@@ -1,5 +1,5 @@
-from db.parser import SQLParser
-from db.table import Table
+from .parser import SQLParser
+from .table import Table
 
 class Database:
     def __init__(self):
