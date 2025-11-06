@@ -1,48 +1,13 @@
-import sys
-from enum import Enum
-from dataclasses import dataclass
-from typing import Optional, List, Any
+"""
+SQLパーサ
 
-class StatementType(Enum):
-    CREATE = "CREATE"
-    INSERT = "INSERT"
-    SELECT = "SELECT"
+SQL文をパースしてASTに変換します。
+既存のlessons/ch01/solution/db/parser.pyをベースに実装しています。
+"""
 
-@dataclass
-class WhereClause:
-    """WHERE句のAST表現"""
-    column: str
-    operator: str  # "=", ">", "<", etc.
-    value: Any
+from typing import List
+from .ast import StatementType, ParsedStatement, WhereClause, ColumnDefinition
 
-@dataclass
-class ColumnDefinition:
-    """カラム定義のAST表現"""
-    name: str
-    data_type: str  # "INT", "TEXT", etc.
-
-class ParsedStatement:
-    """パースされたSQL文のAST表現
-    
-    後方互換性のため、従来のpayloadも保持していますが、
-    より構造化された属性を優先的に使用することを推奨します。
-    """
-    def __init__(self, kind: StatementType, payload: dict):
-        self.kind = kind
-        self.payload = payload
-        
-        # CREATE TABLE用の構造化データ
-        self.table_name: Optional[str] = payload.get("table")
-        self.columns: Optional[List[ColumnDefinition]] = None
-        
-        # INSERT用の構造化データ
-        self.insert_table: Optional[str] = payload.get("table")
-        self.insert_values: Optional[List[Any]] = None
-        
-        # SELECT用の構造化データ
-        self.select_columns: Optional[List[str]] = None
-        self.select_table: Optional[str] = None
-        self.where_clause: Optional[WhereClause] = None
 
 class SqlParser:
     """SQL文をパースするクラス
@@ -51,7 +16,7 @@ class SqlParser:
     将来的な拡張（エラー履歴、設定の保持など）が容易になります。
     """
     
-    def tokenize(self, line: str) -> list[str]:
+    def tokenize(self, line: str) -> List[str]:
         """SQL文を行単位でトークンに分割する
         
         簡易的な実装ですが、基本的なクォート処理と括弧の扱いに対応しています。
@@ -135,7 +100,7 @@ class SqlParser:
         
         raise ValueError(f"unsupported statement: {line}")
     
-    def _parse_create(self, toks: list[str], original_line: str) -> ParsedStatement:
+    def _parse_create(self, toks: List[str], original_line: str) -> ParsedStatement:
         """CREATE TABLE文をパースする
         
         Args:
@@ -203,7 +168,7 @@ class SqlParser:
         stmt.columns = columns
         return stmt
     
-    def _parse_insert(self, toks: list[str], original_line: str) -> ParsedStatement:
+    def _parse_insert(self, toks: List[str], original_line: str) -> ParsedStatement:
         """INSERT INTO文をパースする
         
         Args:
@@ -260,7 +225,7 @@ class SqlParser:
         stmt.insert_values = values
         return stmt
     
-    def _parse_select(self, toks: list[str], original_line: str) -> ParsedStatement:
+    def _parse_select(self, toks: List[str], original_line: str) -> ParsedStatement:
         """SELECT文をパースする
         
         Args:
@@ -335,46 +300,3 @@ class SqlParser:
         stmt.where_clause = where_clause
         return stmt
 
-def handle_create(stmt: ParsedStatement):
-    print(f"[CREATE] {stmt.payload}")
-
-def handle_insert(stmt: ParsedStatement):
-    print(f"[INSERT] {stmt.payload}")
-
-def handle_select(stmt: ParsedStatement):
-    print(f"[SELECT] {stmt.payload}")
-
-def repl():
-    print("SenkuDB> type .exit to quit")
-    while True:
-        try:
-            line = input("senku> ").strip()
-        except EOFError:
-            break
-
-        if not line:
-            continue
-        if line.startswith("."):
-            if line == ".exit":
-                print("bye")
-                break
-            elif line == ".help":
-                print("Commands: .exit, .help")
-            else:
-                print(f"unknown meta command: {line}")
-            continue
-
-        try:
-            parser = SqlParser()
-            stmt = parser.parse(line)
-            if stmt.kind == StatementType.CREATE:
-                handle_create(stmt)
-            elif stmt.kind == StatementType.INSERT:
-                handle_insert(stmt)
-            elif stmt.kind == StatementType.SELECT:
-                handle_select(stmt)
-        except Exception as e:
-            print(f"error: {e}", file=sys.stderr)
-
-if __name__ == "__main__":
-    repl()

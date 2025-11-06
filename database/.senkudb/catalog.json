@@ -1,0 +1,22 @@
+{
+  "tables": {
+    "user": {
+      "columns": [
+        {
+          "name": "id",
+          "data_type": "INT",
+          "nullable": true,
+          "default_value": null
+        },
+        {
+          "name": "name",
+          "data_type": "STR",
+          "nullable": true,
+          "default_value": null
+        }
+      ],
+      "file_path": ".senkudb/user.heap",
+      "row_count": 0
+    }
+  }
+}

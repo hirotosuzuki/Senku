@@ -1,0 +1,238 @@
+"""
+ヒープファイル管理
+
+テーブルのデータを物理的に保存する「ヒープファイル」を管理します。
+ヒープファイルは複数のページから構成され、タプル（行）を順次追加していく方式です。
+
+「ヒープ」という名前の由来:
+- データが任意の順序で格納されるため、ヒープ（積み重ね）と呼ばれます
+- インデックスがない場合、全ページをスキャンする必要があります
+- これが「フルテーブルスキャン」の基礎となります
+"""
+
+import os
+import struct
+from typing import Optional, List, Iterator
+from dataclasses import dataclass
+from pathlib import Path
+
+from .page import Page, PAGE_SIZE
+
+
+@dataclass
+class HeapTuple:
+    """ヒープタプル（行）の表現
+    
+    データベースの1行を表現します。
+    将来的にはNULL値の処理や可変長カラムのサポートを追加します。
+    """
+    values: List[any]  # カラム値のリスト
+    tuple_id: Optional[tuple[int, int]] = None  # (page_id, slot_id)
+    
+    def to_bytes(self) -> bytes:
+        """タプルをバイト列にシリアライズ
+        
+        簡易的な実装: 各値を型に応じてシリアライズ
+        将来的にはより効率的なフォーマット（列指向など）を検討
+        """
+        parts = []
+        for value in self.values:
+            if isinstance(value, int):
+                parts.append(struct.pack(">i", value))  # 4バイト整数
+            elif isinstance(value, str):
+                encoded = value.encode('utf-8')
+                parts.append(struct.pack(">I", len(encoded)))  # 長さ
+                parts.append(encoded)  # データ
+            elif isinstance(value, float):
+                parts.append(struct.pack(">d", value))  # 8バイト浮動小数点数
+            else:
+                # その他の型は文字列として扱う
+                encoded = str(value).encode('utf-8')
+                parts.append(struct.pack(">I", len(encoded)))
+                parts.append(encoded)
+        
+        return b''.join(parts)
+    
+    @classmethod
+    def from_bytes(cls, data: bytes, schema: List[tuple[str, str]]) -> "HeapTuple":
+        """バイト列からタプルを復元
+        
+        Args:
+            data: タプルのバイト列
+            schema: スキーマ情報 [(column_name, data_type), ...]
+            
+        Returns:
+            復元されたHeapTuple
+        """
+        values = []
+        offset = 0
+        
+        for col_name, col_type in schema:
+            if col_type == "INT":
+                value = struct.unpack_from(">i", data, offset)[0]
+                offset += 4
+            elif col_type == "TEXT":
+                length = struct.unpack_from(">I", data, offset)[0]
+                offset += 4
+                value = data[offset:offset + length].decode('utf-8')
+                offset += length
+            elif col_type == "FLOAT":
+                value = struct.unpack_from(">d", data, offset)[0]
+                offset += 8
+            else:
+                # デフォルトはTEXTとして扱う
+                length = struct.unpack_from(">I", data, offset)[0]
+                offset += 4
+                value = data[offset:offset + length].decode('utf-8')
+                offset += length
+            
+            values.append(value)
+        
+        return cls(values=values)
+
+
+class HeapFile:
+    """ヒープファイル
+    
+    テーブルのデータを物理的に保存するファイルを管理します。
+    各テーブルは1つのヒープファイルに対応します。
+    
+    ファイル構造:
+    - ファイルは複数の固定長ページ（8KB）から構成
+    - ページは順次追加され、既存ページが満杯になったら新しいページを追加
+    - 削除されたタプルのスペースは再利用可能（将来のVACUUM機能で整理）
+    """
+    
+    def __init__(self, file_path: Path):
+        """ヒープファイルを初期化
+        
+        Args:
+            file_path: ヒープファイルのパス
+        """
+        self.file_path = Path(file_path)
+        self.page_count = 0
+        
+        # ファイルが存在する場合はページ数を計算
+        if self.file_path.exists():
+            file_size = self.file_path.stat().st_size
+            self.page_count = file_size // PAGE_SIZE
+    
+    def create(self):
+        """新しいヒープファイルを作成"""
+        self.file_path.parent.mkdir(parents=True, exist_ok=True)
+        self.file_path.touch()
+        self.page_count = 0
+    
+    def get_page(self, page_id: int) -> Optional[Page]:
+        """ページを読み込む
+        
+        Args:
+            page_id: ページID（0始まり）
+            
+        Returns:
+            Pageオブジェクト（存在しない場合はNone）
+        """
+        if page_id >= self.page_count:
+            return None
+        
+        with open(self.file_path, 'rb') as f:
+            f.seek(page_id * PAGE_SIZE)
+            page_data = f.read(PAGE_SIZE)
+        
+        if len(page_data) < PAGE_SIZE:
+            return None
+        
+        return Page.from_bytes(page_data, page_id)
+    
+    def write_page(self, page: Page):
+        """ページを書き込む
+        
+        Args:
+            page: 書き込むPageオブジェクト
+        """
+        with open(self.file_path, 'r+b') as f:
+            f.seek(page.page_id * PAGE_SIZE)
+            f.write(page.to_bytes())
+            f.flush()
+            os.fsync(f.fileno())  # ディスクへの確実な書き込み
+    
+    def allocate_page(self) -> Page:
+        """新しいページを割り当て
+        
+        Returns:
+            新しく作成されたPageオブジェクト
+        """
+        page = Page(page_id=self.page_count)
+        self.page_count += 1
+        self.write_page(page)
+        return page
+    
+    def insert_tuple(self, tuple_data: bytes) -> tuple[int, int]:
+        """タプルを挿入
+        
+        Args:
+            tuple_data: タプルのバイト列
+            
+        Returns:
+            (page_id, slot_id) のタプル
+        """
+        # 既存のページに空きがあるか確認
+        for page_id in range(self.page_count):
+            page = self.get_page(page_id)
+            if page and page.get_free_space() >= len(tuple_data) + 8:  # タプル + スロット
+                slot_id = page.insert_tuple(tuple_data)
+                if slot_id is not None:
+                    self.write_page(page)
+                    return (page_id, slot_id)
+        
+        # 既存ページに空きがない場合は新しいページを割り当て
+        page = self.allocate_page()
+        slot_id = page.insert_tuple(tuple_data)
+        if slot_id is None:
+            raise RuntimeError("タプルが大きすぎて1ページに収まりません")
+        
+        self.write_page(page)
+        return (page.page_id, slot_id)
+    
+    def scan_tuples(self, schema: List[tuple[str, str]]) -> Iterator[HeapTuple]:
+        """全タプルをスキャン（フルテーブルスキャン）
+        
+        Args:
+            schema: スキーマ情報
+            
+        Yields:
+            HeapTupleオブジェクト
+        """
+        for page_id in range(self.page_count):
+            page = self.get_page(page_id)
+            if page:
+                for slot_id in range(page.header.slot_count):
+                    tuple_data = page.get_tuple(slot_id)
+                    if tuple_data:
+                        tuple_obj = HeapTuple.from_bytes(tuple_data, schema)
+                        tuple_obj.tuple_id = (page_id, slot_id)
+                        yield tuple_obj
+    
+    def get_tuple(self, page_id: int, slot_id: int, schema: List[tuple[str, str]]) -> Optional[HeapTuple]:
+        """特定のタプルを取得
+        
+        Args:
+            page_id: ページID
+            slot_id: スロットID
+            schema: スキーマ情報
+            
+        Returns:
+            HeapTupleオブジェクト（存在しない場合はNone）
+        """
+        page = self.get_page(page_id)
+        if not page:
+            return None
+        
+        tuple_data = page.get_tuple(slot_id)
+        if not tuple_data:
+            return None
+        
+        tuple_obj = HeapTuple.from_bytes(tuple_data, schema)
+        tuple_obj.tuple_id = (page_id, slot_id)
+        return tuple_obj
+
