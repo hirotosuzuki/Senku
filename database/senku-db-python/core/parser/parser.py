@@ -3,10 +3,18 @@ SQLパーサ
 
 SQL文をパースしてASTに変換します。
 既存のlessons/ch01/solution/db/parser.pyをベースに実装しています。
+
+パーサの役割:
+- 字句解析器（Lexer）が生成したトークン列を受け取る
+- トークン列を構文規則に従って解析（構文解析）
+- AST（抽象構文木）を生成
+
+コンパイラ理論における「構文解析（Parsing）」の段階を担当します。
 """
 
 from typing import List
 from .ast import StatementType, ParsedStatement, WhereClause, ColumnDefinition
+from .lexer import Lexer
 
 
 class SqlParser:
@@ -14,64 +22,17 @@ class SqlParser:
     
     関数ベースの実装からクラスベースに移行することで、
     将来的な拡張（エラー履歴、設定の保持など）が容易になります。
+    
+    字句解析はLexerクラスに分離され、パーサは構文解析に専念します。
     """
     
-    def tokenize(self, line: str) -> List[str]:
-        """SQL文を行単位でトークンに分割する
-        
-        簡易的な実装ですが、基本的なクォート処理と括弧の扱いに対応しています。
-        将来的には本格的な字句解析器（Lexer）に置き換えることができます。
+    def __init__(self, lexer: Lexer = None):
+        """パーサを初期化
         
         Args:
-            line: 入力SQL文
-            
-        Returns:
-            トークンのリスト
+            lexer: 字句解析器（Noneの場合は新規作成）
         """
-        line = line.strip().rstrip(";")
-        
-        # クォートされた文字列を保護しながら分割
-        tokens = []
-        current = ""
-        in_quotes = False
-        quote_char = None
-        
-        i = 0
-        while i < len(line):
-            char = line[i]
-            
-            if char in ("'", '"') and (i == 0 or line[i-1] != '\\'):
-                if not in_quotes:
-                    in_quotes = True
-                    quote_char = char
-                    if current.strip():
-                        tokens.extend(current.strip().split())
-                        current = ""
-                    current += char
-                elif char == quote_char:
-                    in_quotes = False
-                    current += char
-                    tokens.append(current)
-                    current = ""
-                    quote_char = None
-                else:
-                    current += char
-            elif in_quotes:
-                current += char
-            elif char in ('(', ')', ','):
-                if current.strip():
-                    tokens.extend(current.strip().split())
-                    current = ""
-                if char != ' ':
-                    tokens.append(char)
-            else:
-                current += char
-            i += 1
-        
-        if current.strip():
-            tokens.extend(current.strip().split())
-        
-        return tokens
+        self.lexer = lexer or Lexer()
     
     def parse(self, line: str) -> ParsedStatement:
         """SQL文をパースしてParsedStatementに変換する
@@ -85,7 +46,7 @@ class SqlParser:
         Raises:
             ValueError: 空のステートメントや未対応のステートメントの場合
         """
-        toks = self.tokenize(line)
+        toks = self.lexer.tokenize(line)
         if not toks:
             raise ValueError("empty statement")
         

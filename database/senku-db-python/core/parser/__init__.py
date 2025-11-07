@@ -6,6 +6,7 @@ SQL文を解析してAST（抽象構文木）に変換します。
 """
 
 from .ast import StatementType, ParsedStatement, WhereClause, ColumnDefinition
+from .lexer import Lexer
 from .parser import SqlParser
 
 __all__ = [
@@ -13,6 +14,7 @@ __all__ = [
     "ParsedStatement",
     "WhereClause",
     "ColumnDefinition",
+    "Lexer",
     "SqlParser",
 ]
 
