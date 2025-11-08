@@ -3,11 +3,16 @@ AST（抽象構文木）定義
 
 パースされたSQL文を表現するデータ構造です。
 実行エンジンがこのASTを解釈してクエリを実行します。
+
+各ステートメントタイプごとに専用のクラスを定義することで、
+型安全性とコードの可読性を向上させています。
+
+共通のインターフェースはProtocolで定義し、mixin的な役割を果たします。
 """
 
 from enum import Enum
 from dataclasses import dataclass
-from typing import Optional, List, Any
+from typing import Optional, List, Any, Union, Protocol
 
 
 class StatementType(Enum):
@@ -35,27 +40,62 @@ class ColumnDefinition:
     data_type: str  # "INT", "TEXT", "FLOAT", etc.
 
 
-class ParsedStatement:
-    """パースされたSQL文のAST表現
+class StatementProtocol(Protocol):
+    """すべてのステートメントが実装すべき共通インターフェース
     
-    後方互換性のため、従来のpayloadも保持していますが、
-    より構造化された属性を優先的に使用することを推奨します。
+    このProtocolは、すべてのステートメントクラスが
+    共通して持つべき属性とメソッドを定義します。
     """
     
-    def __init__(self, kind: StatementType, payload: dict):
-        self.kind = kind
-        self.payload = payload
-        
-        # CREATE TABLE用の構造化データ
-        self.table_name: Optional[str] = payload.get("table")
-        self.columns: Optional[List[ColumnDefinition]] = None
-        
-        # INSERT用の構造化データ
-        self.insert_table: Optional[str] = payload.get("table")
-        self.insert_values: Optional[List[Any]] = None
-        
-        # SELECT用の構造化データ
-        self.select_columns: Optional[List[str]] = None
-        self.select_table: Optional[str] = None
-        self.where_clause: Optional[WhereClause] = None
+    original_sql: str
+    """元のSQL文（デバッグやログ出力用）"""
+    
+    @property
+    def kind(self) -> StatementType:
+        """ステートメントタイプを返す"""
+        ...
+
+
+@dataclass
+class CreateStatement(StatementProtocol):
+    """CREATE TABLE文のAST表現"""
+    table_name: str
+    columns: List[ColumnDefinition]
+    original_sql: str = ""
+    
+    @property
+    def kind(self) -> StatementType:
+        """ステートメントタイプを返す"""
+        return StatementType.CREATE
+
+
+@dataclass
+class InsertStatement(StatementProtocol):
+    """INSERT INTO文のAST表現"""
+    table_name: str
+    values: List[Any]
+    original_sql: str = ""
+    
+    @property
+    def kind(self) -> StatementType:
+        """ステートメントタイプを返す"""
+        return StatementType.INSERT
+
+
+@dataclass
+class SelectStatement(StatementProtocol):
+    """SELECT文のAST表現"""
+    columns: List[str]  # ["*"] またはカラム名のリスト
+    table_name: str
+    where_clause: Optional[WhereClause] = None
+    original_sql: str = ""
+    
+    @property
+    def kind(self) -> StatementType:
+        """ステートメントタイプを返す"""
+        return StatementType.SELECT
+
+
+# ParsedStatementは、すべてのステートメントタイプのUnion型
+ParsedStatement = Union[CreateStatement, InsertStatement, SelectStatement]
 

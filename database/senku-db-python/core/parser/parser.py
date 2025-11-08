@@ -13,7 +13,14 @@ SQL文をパースしてASTに変換します。
 """
 
 from typing import List
-from .ast import StatementType, ParsedStatement, WhereClause, ColumnDefinition
+from .ast import (
+    ParsedStatement,
+    CreateStatement,
+    InsertStatement,
+    SelectStatement,
+    WhereClause,
+    ColumnDefinition,
+)
 from .lexer import Lexer
 
 
@@ -121,13 +128,11 @@ class SqlParser:
                     col_type = current_col[1].upper()
                     columns.append(ColumnDefinition(col_name, col_type))
         
-        stmt = ParsedStatement(
-            StatementType.CREATE,
-            {"table": table_name, "raw": original_line, "columns": columns}
+        return CreateStatement(
+            table_name=table_name,
+            columns=columns,
+            original_sql=original_line
         )
-        stmt.table_name = table_name
-        stmt.columns = columns
-        return stmt
     
     def _parse_insert(self, toks: List[str], original_line: str) -> ParsedStatement:
         """INSERT INTO文をパースする
@@ -178,13 +183,11 @@ class SqlParser:
                             except ValueError:
                                 values.append(tok)
         
-        stmt = ParsedStatement(
-            StatementType.INSERT,
-            {"table": table, "raw": original_line, "values": values}
+        return InsertStatement(
+            table_name=table,
+            values=values,
+            original_sql=original_line
         )
-        stmt.insert_table = table
-        stmt.insert_values = values
-        return stmt
     
     def _parse_select(self, toks: List[str], original_line: str) -> ParsedStatement:
         """SELECT文をパースする
@@ -247,17 +250,10 @@ class SqlParser:
             
             where_clause = WhereClause(column, operator, value)
         
-        stmt = ParsedStatement(
-            StatementType.SELECT,
-            {
-                "raw": original_line,
-                "columns": columns,
-                "table": table_name,
-                "where": where_clause
-            }
+        return SelectStatement(
+            columns=columns,
+            table_name=table_name,
+            where_clause=where_clause,
+            original_sql=original_line
         )
-        stmt.select_columns = columns
-        stmt.select_table = table_name
-        stmt.where_clause = where_clause
-        return stmt
 

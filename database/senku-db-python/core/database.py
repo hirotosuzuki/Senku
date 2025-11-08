@@ -11,7 +11,12 @@ SQL文を受け取り、パース、実行、結果返却を行います。
 from pathlib import Path
 from typing import Optional, List, Any
 
-from .parser import SqlParser, ParsedStatement, StatementType
+from .parser import (
+    SqlParser,
+    CreateStatement,
+    InsertStatement,
+    SelectStatement,
+)
 from .catalog import Catalog, Schema
 from .storage import HeapFile, HeapTuple, BufferManager
 from .executor import (
@@ -89,24 +94,21 @@ class Database:
         stmt = self.parser.parse(sql)
         
         # ステートメントの種類に応じて処理
-        if stmt.kind == StatementType.CREATE:
+        if isinstance(stmt, CreateStatement):
             return self._execute_create(stmt)
-        elif stmt.kind == StatementType.INSERT:
+        elif isinstance(stmt, InsertStatement):
             return self._execute_insert(stmt)
-        elif stmt.kind == StatementType.SELECT:
+        elif isinstance(stmt, SelectStatement):
             return self._execute_select(stmt)
         else:
             raise ValueError(f"未対応のステートメント: {stmt.kind}")
     
-    def _execute_create(self, stmt: ParsedStatement) -> None:
+    def _execute_create(self, stmt: CreateStatement) -> None:
         """CREATE TABLE文を実行
         
         Args:
             stmt: パースされたCREATEステートメント
         """
-        if not stmt.table_name or not stmt.columns:
-            raise ValueError("CREATE TABLE文にテーブル名またはカラム定義がありません")
-        
         if self.catalog.table_exists(stmt.table_name):
             raise ValueError(f"テーブル '{stmt.table_name}' は既に存在します")
         
@@ -129,40 +131,37 @@ class Database:
         # メモリキャッシュに追加
         self.heap_files[stmt.table_name] = heap_file
     
-    def _execute_insert(self, stmt: ParsedStatement) -> None:
+    def _execute_insert(self, stmt: InsertStatement) -> None:
         """INSERT文を実行
         
         Args:
             stmt: パースされたINSERTステートメント
         """
-        if not stmt.insert_table or not stmt.insert_values:
-            raise ValueError("INSERT文にテーブル名または値がありません")
-        
         # スキーマを取得
-        schema = self.catalog.get_schema(stmt.insert_table)
+        schema = self.catalog.get_schema(stmt.table_name)
         if not schema:
-            raise ValueError(f"テーブル '{stmt.insert_table}' が存在しません")
+            raise ValueError(f"テーブル '{stmt.table_name}' が存在しません")
         
         # 値の検証
-        if not schema.validate_values(stmt.insert_values):
+        if not schema.validate_values(stmt.values):
             raise ValueError("値がスキーマに適合しません")
         
         # ヒープファイルを取得
-        heap_file = self._get_heap_file(stmt.insert_table)
+        heap_file = self._get_heap_file(stmt.table_name)
         if not heap_file:
-            raise ValueError(f"テーブル '{stmt.insert_table}' のヒープファイルが見つかりません")
+            raise ValueError(f"テーブル '{stmt.table_name}' のヒープファイルが見つかりません")
         
         # タプルを作成
-        heap_tuple = HeapTuple(values=stmt.insert_values)
+        heap_tuple = HeapTuple(values=stmt.values)
         tuple_data = heap_tuple.to_bytes()
         
         # タプルを挿入
         heap_file.insert_tuple(tuple_data)
         
         # 行数を更新（簡易版: 実際は正確にカウントする必要がある）
-        # self.catalog.update_row_count(stmt.insert_table, ...)
+        # self.catalog.update_row_count(stmt.table_name, ...)
     
-    def _execute_select(self, stmt: ParsedStatement) -> List[List[Any]]:
+    def _execute_select(self, stmt: SelectStatement) -> List[List[Any]]:
         """SELECT文を実行
         
         Args:
@@ -171,18 +170,15 @@ class Database:
         Returns:
             結果のリスト（各行は値のリスト）
         """
-        if not stmt.select_table:
-            raise ValueError("SELECT文にテーブル名がありません")
-        
         # スキーマを取得
-        schema = self.catalog.get_schema(stmt.select_table)
+        schema = self.catalog.get_schema(stmt.table_name)
         if not schema:
-            raise ValueError(f"テーブル '{stmt.select_table}' が存在しません")
+            raise ValueError(f"テーブル '{stmt.table_name}' が存在しません")
         
         # ヒープファイルを取得
-        heap_file = self._get_heap_file(stmt.select_table)
+        heap_file = self._get_heap_file(stmt.table_name)
         if not heap_file:
-            raise ValueError(f"テーブル '{stmt.select_table}' のヒープファイルが見つかりません")
+            raise ValueError(f"テーブル '{stmt.table_name}' のヒープファイルが見つかりません")
         
         # スキャン演算子を作成
         scan = ScanOperator(heap_file, schema)
@@ -218,10 +214,10 @@ class Database:
             iterator = filter_op
         
         # SELECT句の処理（射影）
-        if stmt.select_columns and stmt.select_columns != ["*"]:
+        if stmt.columns and stmt.columns != ["*"]:
             # 指定されたカラムのみを選択
             column_indices = []
-            for col_name in stmt.select_columns:
+            for col_name in stmt.columns:
                 index = schema.get_column_index(col_name)
                 if index is None:
                     raise ValueError(f"カラム '{col_name}' が存在しません")
