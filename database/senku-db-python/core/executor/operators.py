@@ -14,10 +14,9 @@ Iteratorモデルに基づく各種演算子を実装します。
 """
 
 from typing import Optional, List, Callable, Any
-from pathlib import Path
 
 from .iterator import Iterator, Tuple
-from ..storage.heap import HeapFile, HeapTuple
+from ..storage.heap import HeapFile
 from ..catalog.schema import Schema
 
 
