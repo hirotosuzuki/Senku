@@ -44,11 +44,19 @@ sequenceDiagram
     U->>D: execute("SELECT ...")
     D->>P: parse(sql)
     P-->>D: AST(Select)
+
     D->>C: get_schema(table)
     C-->>D: Schema
-    D->>E: build operators (Scan→Filter→Project)
-    E->>S: read tuples
-    E-->>D: rows
+    D->>D: heap_file = _get_heap_file(table)
+
+    D->>E: build Scan→(Filter?)→(Project?)
+    E->>E: open()
+    loop next()
+        E->>S: read tuple
+        S-->>E: tuple
+        E-->>D: values (after Filter/Project)
+    end
+    E->>E: close()
     D-->>U: results
 ```
 
