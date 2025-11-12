@@ -97,5 +97,3 @@ sequenceDiagram
     S-->>D: done
     D-->>U: OK
 ```
-
-

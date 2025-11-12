@@ -14,7 +14,7 @@ from typing import Optional, Dict
 from pathlib import Path
 import threading
 
-from .page import Page, PAGE_SIZE
+from .page import Page
 from .heap import HeapFile
 
 
