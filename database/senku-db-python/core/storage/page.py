@@ -18,9 +18,9 @@ from dataclasses import dataclass
 # これはPostgreSQLの標準ページサイズと同じです
 PAGE_SIZE = 8192
 
-# ページヘッダーサイズ: 24 bytes
-# 将来の拡張を考慮して余裕を持たせています
-PAGE_HEADER_SIZE = 24
+# ページヘッダーサイズ: 16 bytes
+# checksum(4) + free_space(4) + slot_count(4) + lsn(4) = 16 bytes
+PAGE_HEADER_SIZE = 16
 
 # スロット配列のオーバーヘッド（各スロットは8 bytes: offset + length）
 SLOT_SIZE = 8
@@ -52,7 +52,7 @@ class PageHeader:
     @classmethod
     def from_bytes(cls, data: bytes) -> "PageHeader":
         """バイト列からページヘッダーを復元"""
-        checksum, free_space, slot_count, lsn = struct.unpack(">IIII", data[:16])
+        checksum, free_space, slot_count, lsn = struct.unpack(">IIII", data[:PAGE_HEADER_SIZE])
         return cls(
             checksum=checksum,
             free_space=free_space,
