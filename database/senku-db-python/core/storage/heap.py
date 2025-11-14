@@ -11,12 +11,12 @@
 """
 
 import os
-import struct
 from typing import Optional, List, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
 from .page import Page, PAGE_SIZE
+from ..types import DataType, INT, TEXT, FLOAT
 
 
 @dataclass
@@ -29,27 +29,35 @@ class HeapTuple:
     values: List[any]  # カラム値のリスト
     tuple_id: Optional[tuple[int, int]] = None  # (page_id, slot_id)
     
-    def to_bytes(self) -> bytes:
+    def to_bytes(self, schema: Optional[List[tuple[str, str]]] = None) -> bytes:
         """タプルをバイト列にシリアライズ
         
         簡易的な実装: 各値を型に応じてシリアライズ
         将来的にはより効率的なフォーマット（列指向など）を検討
+        
+        Args:
+            schema: スキーマ情報 [(column_name, data_type), ...]
+                   指定されない場合は、値の型から推論
         """
         parts = []
-        for value in self.values:
-            if isinstance(value, int):
-                parts.append(struct.pack(">i", value))  # 4バイト整数
-            elif isinstance(value, str):
-                encoded = value.encode('utf-8')
-                parts.append(struct.pack(">I", len(encoded)))  # 長さ
-                parts.append(encoded)  # データ
-            elif isinstance(value, float):
-                parts.append(struct.pack(">d", value))  # 8バイト浮動小数点数
-            else:
-                # その他の型は文字列として扱う
-                encoded = str(value).encode('utf-8')
-                parts.append(struct.pack(">I", len(encoded)))
-                parts.append(encoded)
+        
+        if schema:
+            # スキーマが指定されている場合は、それを使用
+            for (col_name, col_type_str), value in zip(schema, self.values):
+                col_type = DataType.from_string(col_type_str)
+                parts.append(col_type.serialize(value))
+        else:
+            # スキーマが指定されていない場合は、値の型から推論（後方互換性）
+            for value in self.values:
+                if isinstance(value, int):
+                    parts.append(INT.serialize(value))
+                elif isinstance(value, str):
+                    parts.append(TEXT.serialize(value))
+                elif isinstance(value, float):
+                    parts.append(FLOAT.serialize(value))
+                else:
+                    # その他の型は文字列として扱う
+                    parts.append(TEXT.serialize(str(value)))
         
         return b''.join(parts)
     
@@ -67,26 +75,15 @@ class HeapTuple:
         values = []
         offset = 0
         
-        for col_name, col_type in schema:
-            if col_type == "INT":
-                value = struct.unpack_from(">i", data, offset)[0]
-                offset += 4
-            elif col_type == "TEXT":
-                length = struct.unpack_from(">I", data, offset)[0]
-                offset += 4
-                value = data[offset:offset + length].decode('utf-8')
-                offset += length
-            elif col_type == "FLOAT":
-                value = struct.unpack_from(">d", data, offset)[0]
-                offset += 8
-            else:
-                # デフォルトはTEXTとして扱う
-                length = struct.unpack_from(">I", data, offset)[0]
-                offset += 4
-                value = data[offset:offset + length].decode('utf-8')
-                offset += length
-            
-            values.append(value)
+        for col_name, col_type_str in schema:
+            try:
+                col_type = DataType.from_string(col_type_str)
+                value, offset = col_type.deserialize(data, offset)
+                values.append(value)
+            except ValueError:
+                # 未知の型はTEXTとして扱う（後方互換性）
+                value, offset = TEXT.deserialize(data, offset)
+                values.append(value)
         
         return cls(values=values)
 

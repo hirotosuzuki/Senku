@@ -8,6 +8,8 @@ SQLのCREATE TABLE文から生成され、カタログに登録されます。
 from dataclasses import dataclass
 from typing import List, Optional
 
+from ..types import DataType
+
 
 @dataclass
 class ColumnDefinition:
@@ -17,18 +19,28 @@ class ColumnDefinition:
     
     Attributes:
         name: カラム名
-        data_type: データ型（"INT", "TEXT", "FLOAT"など）
+        data_type: データ型（DataTypeインスタンス）
         nullable: NULL値を許可するか（将来の拡張）
         default_value: デフォルト値（将来の拡張）
     """
     name: str
-    data_type: str  # "INT", "TEXT", "FLOAT", etc.
+    data_type: DataType
     nullable: bool = True
     default_value: Optional[any] = None
     
     def __post_init__(self):
-        """データ型を正規化（大文字に変換）"""
-        self.data_type = self.data_type.upper()
+        """データ型の型チェック"""
+        if not isinstance(self.data_type, DataType):
+            raise TypeError(
+                f"data_typeはDataTypeインスタンスである必要があります。"
+                f"文字列の場合はDataType.from_string()を使用してください。"
+                f"受け取った値: {self.data_type} (type: {type(self.data_type)})"
+            )
+    
+    @property
+    def data_type_str(self) -> str:
+        """データ型を文字列として取得"""
+        return str(self.data_type)
 
 
 class Schema:
@@ -86,7 +98,7 @@ class Schema:
         Returns:
             [(column_name, data_type), ...] のリスト
         """
-        return [(col.name, col.data_type) for col in self.columns]
+        return [(col.name, col.data_type_str) for col in self.columns]
     
     def validate_values(self, values: List[any]) -> bool:
         """値のリストがスキーマに適合するか検証
@@ -100,24 +112,15 @@ class Schema:
         if len(values) != len(self.columns):
             return False
         
-        # 型チェック（簡易版）
+        # 型チェック
         for i, (value, col_def) in enumerate(zip(values, self.columns)):
             if value is None and not col_def.nullable:
                 return False
             
-            # 型チェック
+            # 型チェック（DataType Enumのvalidateメソッドを使用）
             if value is not None:
-                if col_def.data_type == "INT" and not isinstance(value, int):
-                    try:
-                        int(value)  # 変換可能かチェック
-                    except (ValueError, TypeError):
-                        return False
-                elif col_def.data_type == "FLOAT" and not isinstance(value, (int, float)):
-                    try:
-                        float(value)
-                    except (ValueError, TypeError):
-                        return False
-                # TEXTは任意の値を文字列として扱える
+                if not col_def.data_type.validate(value):
+                    return False
         
         return True
 

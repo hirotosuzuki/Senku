@@ -13,9 +13,10 @@ PostgreSQLのシステムカタログ（pg_class, pg_attribute等）に相当す
 import json
 from typing import Dict, Optional, List
 from pathlib import Path
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 
 from .schema import Schema, ColumnDefinition
+from ..types import DataType
 
 
 @dataclass
@@ -25,9 +26,27 @@ class ColumnMetadata:
     カタログに保存されるカラム情報です。
     """
     name: str
-    data_type: str
+    data_type: DataType
     nullable: bool = True
     default_value: Optional[any] = None
+    
+    def __post_init__(self):
+        """データ型の型チェック"""
+        if not isinstance(self.data_type, DataType):
+            raise TypeError(
+                f"data_typeはDataTypeインスタンスである必要があります。"
+                f"文字列の場合はDataType.from_string()を使用してください。"
+                f"受け取った値: {self.data_type} (type: {type(self.data_type)})"
+            )
+    
+    def to_dict(self) -> dict:
+        """辞書に変換（JSON保存用）"""
+        return {
+            "name": self.name,
+            "data_type": str(self.data_type),  # DataTypeを文字列に変換
+            "nullable": self.nullable,
+            "default_value": self.default_value
+        }
 
 
 @dataclass
@@ -72,7 +91,12 @@ class Catalog:
                 data = json.load(f)
                 for table_name, table_data in data.get('tables', {}).items():
                     columns = [
-                        ColumnMetadata(**col_data)
+                        ColumnMetadata(
+                            name=col_data['name'],
+                            data_type=DataType.from_string(col_data['data_type']),
+                            nullable=col_data.get('nullable', True),
+                            default_value=col_data.get('default_value')
+                        )
                         for col_data in table_data['columns']
                     ]
                     self.tables[table_name] = TableMetadata(
@@ -92,7 +116,7 @@ class Catalog:
         data = {
             'tables': {
                 table_name: {
-                    'columns': [asdict(col) for col in table_meta.columns],
+                    'columns': [col.to_dict() for col in table_meta.columns],
                     'file_path': table_meta.file_path,
                     'row_count': table_meta.row_count
                 }

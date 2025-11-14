@@ -114,8 +114,9 @@ class Database:
         
         # スキーマを作成
         from .catalog.schema import ColumnDefinition as ColDef
+        from .types import DataType
         columns = [
-            ColDef(name=col.name, data_type=col.data_type)
+            ColDef(name=col.name, data_type=DataType.from_string(col.data_type))
             for col in stmt.columns
         ]
         schema = Schema(stmt.table_name, columns)
@@ -153,7 +154,7 @@ class Database:
         
         # タプルを作成
         heap_tuple = HeapTuple(values=stmt.values)
-        tuple_data = heap_tuple.to_bytes()
+        tuple_data = heap_tuple.to_bytes(schema.to_tuple_list())
         
         # タプルを挿入
         heap_file.insert_tuple(tuple_data)
