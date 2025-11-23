@@ -191,17 +191,19 @@ class HeapFile:
         # 新しいページIDは現在のpage_count、スロットIDは0（新しいページの最初のスロット）
         return (self.page_count, 0)
     
-    def insert_tuple_at(self, page_id: int, tuple_data: bytes) -> int:
-        """指定されたページにタプルを挿入
+    def insert_tuple(self, tuple_data: bytes, page_id: int) -> tuple[Page, int]:
+        """タプルを挿入
         
-        Write-Ahead Loggingの原則に従い、WALに書き込んだ後に呼び出されます。
+        Write-Ahead Loggingの原則に従い、指定されたページにタプルを挿入します。
+        このメソッドはページをディスクに書き込まず、更新されたページオブジェクトを返します。
+        ディスクへの書き込みはBufferManagerを通じて、チェックポイント時に行います。
         
         Args:
-            page_id: 挿入先のページID
             tuple_data: タプルのバイト列
-            
+            page_id: 挿入先のページID
+        
         Returns:
-            スロットID
+            (更新されたPageオブジェクト, スロットID) のタプル
         """
         # ページが存在するか確認
         if page_id >= self.page_count:
@@ -221,42 +223,9 @@ class HeapFile:
         if slot_id is None:
             raise RuntimeError(f"ページ {page_id} にタプルを挿入できませんでした（空きスペース不足）")
         
-        # ページを書き込む（メモリ上の変更をディスクに反映）
-        # 注意: チェックポイント時にまとめて書き込むことも可能だが、
-        # フェーズ2では簡易実装として、ここで書き込む
-        self.write_page(page)
-        return slot_id
-    
-    def insert_tuple(self, tuple_data: bytes) -> tuple[int, int]:
-        """タプルを挿入（後方互換性のためのメソッド）
-        
-        このメソッドは、Write-Ahead Loggingの原則に反するため、
-        将来的には非推奨になる可能性があります。
-        新しいコードでは、find_insert_location()とinsert_tuple_at()を使用してください。
-        
-        Args:
-            tuple_data: タプルのバイト列
-            
-        Returns:
-            (page_id, slot_id) のタプル
-        """
-        # 既存のページに空きがあるか確認
-        for page_id in range(self.page_count):
-            page = self.get_page(page_id)
-            if page and page.get_free_space() >= len(tuple_data) + 8:  # タプル + スロット
-                slot_id = page.insert_tuple(tuple_data)
-                if slot_id is not None:
-                    self.write_page(page)
-                    return (page_id, slot_id)
-        
-        # 既存ページに空きがない場合は新しいページを割り当て
-        page = self.allocate_page()
-        slot_id = page.insert_tuple(tuple_data)
-        if slot_id is None:
-            raise RuntimeError("タプルが大きすぎて1ページに収まりません")
-        
-        self.write_page(page)
-        return (page.page_id, slot_id)
+        # ページを返す（ディスクには書き込まない）
+        # ディスクへの書き込みはBufferManagerを通じて、チェックポイント時に行う
+        return (page, slot_id)
     
     def scan_tuples(self, schema: List[tuple[str, str]]) -> Iterator[HeapTuple]:
         """全タプルをスキャン（フルテーブルスキャン）

@@ -85,10 +85,18 @@ class Database:
         Returns:
             チェックポイントのLSN
         """
+        # BufferManagerのダーティページをすべて書き込む
+        for table_name, heap_file in self.heap_files.items():
+            self.buffer_manager.flush_all(heap_file)
+        
+        # チェックポイントを実行
         return self.checkpoint_manager.checkpoint(self.heap_files)
     
     def _get_heap_file(self, table_name: str) -> Optional[HeapFile]:
         """テーブルのヒープファイルを取得
+        
+        BufferManagerを使ってページをキャッシュするため、
+        ページの取得はBufferManagerを通じて行います。
         
         Args:
             table_name: テーブル名
@@ -188,7 +196,8 @@ class Database:
         page_id, slot_id = heap_file.find_insert_location(tuple_data)
         
         # WALにログを書き込む（Write-Ahead: データを変更する前に、必ずログを書き込む）
-        lsn = self.wal_writer.write_insert_log(
+        # LSNは将来の拡張（トランザクション管理など）で使用する可能性がある
+        _lsn = self.wal_writer.write_insert_log(
             table_name=stmt.table_name,
             page_id=page_id,
             slot_id=slot_id,
@@ -196,7 +205,12 @@ class Database:
         )
         
         # WALへの書き込みが完了したら、メモリ上のページを更新
-        actual_slot_id = heap_file.insert_tuple_at(page_id, tuple_data)
+        # BufferManagerを使ってページを管理（ダーティページとしてマーク）
+        page, actual_slot_id = heap_file.insert_tuple(tuple_data, page_id=page_id)
+        
+        # BufferManagerにページをキャッシュし、ダーティとしてマーク
+        self.buffer_manager.buffer_pool.put(heap_file.file_path, page_id, page)
+        self.buffer_manager.mark_dirty(heap_file, page)
         
         # スロットIDの検証（デバッグ用）
         if actual_slot_id != slot_id:
