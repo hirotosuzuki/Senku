@@ -25,6 +25,7 @@ from .executor import (
     ProjectOperator,
     Tuple as ExecTuple,
 )
+from .wal import WALWriter, CheckpointManager, RecoveryManager
 
 
 class Database:
@@ -54,11 +55,37 @@ class Database:
         # バッファマネージャを初期化
         self.buffer_manager = BufferManager()
         
+        # WALを初期化
+        wal_path = self.db_path / "wal.log"
+        self.wal_writer = WALWriter(wal_path)
+        self.checkpoint_manager = CheckpointManager(self.wal_writer, self.db_path)
+        
         # パーサを初期化
         self.parser = SqlParser()
         
         # テーブルファイルのマッピング（メモリ内キャッシュ）
         self.heap_files: dict[str, HeapFile] = {}
+        
+        # 起動時にリカバリを実行
+        self._recover()
+    
+    def _recover(self):
+        """起動時にリカバリを実行
+        
+        WALファイルを読み込んで、チェックポイント以降の操作を再実行します。
+        """
+        recovery_manager = RecoveryManager(self.db_path, self.catalog)
+        recovered_count = recovery_manager.recover()
+        if recovered_count > 0:
+            print(f"Recovered {recovered_count} log records from WAL")
+    
+    def checkpoint(self) -> int:
+        """チェックポイントを実行
+        
+        Returns:
+            チェックポイントのLSN
+        """
+        return self.checkpoint_manager.checkpoint(self.heap_files)
     
     def _get_heap_file(self, table_name: str) -> Optional[HeapFile]:
         """テーブルのヒープファイルを取得
@@ -157,7 +184,15 @@ class Database:
         tuple_data = heap_tuple.to_bytes(schema.to_tuple_list())
         
         # タプルを挿入
-        heap_file.insert_tuple(tuple_data)
+        page_id, slot_id = heap_file.insert_tuple(tuple_data)
+        
+        # WALにログを書き込む（Write-Ahead Logging）
+        self.wal_writer.write_insert_log(
+            table_name=stmt.table_name,
+            page_id=page_id,
+            slot_id=slot_id,
+            tuple_data=tuple_data
+        )
         
         # 行数を更新（簡易版: 実際は正確にカウントする必要がある）
         # self.catalog.update_row_count(stmt.table_name, ...)
