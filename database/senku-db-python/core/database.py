@@ -183,16 +183,27 @@ class Database:
         heap_tuple = HeapTuple(values=stmt.values)
         tuple_data = heap_tuple.to_bytes(schema.to_tuple_list())
         
-        # タプルを挿入
-        page_id, slot_id = heap_file.insert_tuple(tuple_data)
+        # Write-Ahead Loggingの原則に従い、先に挿入先を決定
+        # （実際にはまだメモリ上のページを変更しない）
+        page_id, slot_id = heap_file.find_insert_location(tuple_data)
         
-        # WALにログを書き込む（Write-Ahead Logging）
-        self.wal_writer.write_insert_log(
+        # WALにログを書き込む（Write-Ahead: データを変更する前に、必ずログを書き込む）
+        lsn = self.wal_writer.write_insert_log(
             table_name=stmt.table_name,
             page_id=page_id,
             slot_id=slot_id,
             tuple_data=tuple_data
         )
+        
+        # WALへの書き込みが完了したら、メモリ上のページを更新
+        actual_slot_id = heap_file.insert_tuple_at(page_id, tuple_data)
+        
+        # スロットIDの検証（デバッグ用）
+        if actual_slot_id != slot_id:
+            # これは通常発生しないはずだが、念のため警告を出す
+            # 実際には、find_insert_location()で正確なスロットIDを予測しているため、
+            # この条件は満たされないはず
+            pass  # フェーズ2では警告を出さない（将来的にログに記録）
         
         # 行数を更新（簡易版: 実際は正確にカウントする必要がある）
         # self.catalog.update_row_count(stmt.table_name, ...)

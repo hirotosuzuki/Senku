@@ -164,8 +164,75 @@ class HeapFile:
         self.write_page(page)
         return page
     
+    def find_insert_location(self, tuple_data: bytes) -> tuple[int, int]:
+        """挿入先のページとスロットを決定（実際にはまだ挿入しない）
+        
+        Write-Ahead Loggingの原則に従い、WALに書き込む前に挿入先を決定するために使用します。
+        
+        Args:
+            tuple_data: タプルのバイト列
+            
+        Returns:
+            (page_id, slot_id) のタプル
+            slot_idは、挿入時に割り当てられるスロットID（現在のslot_count）
+        """
+        required_space = len(tuple_data) + 8  # タプル + スロット
+        
+        # 既存のページに空きがあるか確認
+        for page_id in range(self.page_count):
+            page = self.get_page(page_id)
+            if page and page.get_free_space() >= required_space:
+                # このページに挿入可能
+                # スロットIDは現在のslot_count（次の挿入でこの値になる）
+                slot_id = page.header.slot_count
+                return (page_id, slot_id)
+        
+        # 既存ページに空きがない場合は新しいページが必要
+        # 新しいページIDは現在のpage_count、スロットIDは0（新しいページの最初のスロット）
+        return (self.page_count, 0)
+    
+    def insert_tuple_at(self, page_id: int, tuple_data: bytes) -> int:
+        """指定されたページにタプルを挿入
+        
+        Write-Ahead Loggingの原則に従い、WALに書き込んだ後に呼び出されます。
+        
+        Args:
+            page_id: 挿入先のページID
+            tuple_data: タプルのバイト列
+            
+        Returns:
+            スロットID
+        """
+        # ページが存在するか確認
+        if page_id >= self.page_count:
+            # 新しいページを割り当て（メモリ上のみ、まだディスクには書き込まない）
+            if page_id == self.page_count:
+                page = Page(page_id=page_id)
+                self.page_count += 1
+            else:
+                raise ValueError(f"ページID {page_id} は無効です（現在のページ数: {self.page_count}）")
+        else:
+            page = self.get_page(page_id)
+            if not page:
+                raise ValueError(f"ページ {page_id} が見つかりません")
+        
+        # タプルを挿入
+        slot_id = page.insert_tuple(tuple_data)
+        if slot_id is None:
+            raise RuntimeError(f"ページ {page_id} にタプルを挿入できませんでした（空きスペース不足）")
+        
+        # ページを書き込む（メモリ上の変更をディスクに反映）
+        # 注意: チェックポイント時にまとめて書き込むことも可能だが、
+        # フェーズ2では簡易実装として、ここで書き込む
+        self.write_page(page)
+        return slot_id
+    
     def insert_tuple(self, tuple_data: bytes) -> tuple[int, int]:
-        """タプルを挿入
+        """タプルを挿入（後方互換性のためのメソッド）
+        
+        このメソッドは、Write-Ahead Loggingの原則に反するため、
+        将来的には非推奨になる可能性があります。
+        新しいコードでは、find_insert_location()とinsert_tuple_at()を使用してください。
         
         Args:
             tuple_data: タプルのバイト列
