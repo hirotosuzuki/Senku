@@ -92,7 +92,7 @@ sequenceDiagram
     U->>D: INSERT INTO users VALUES (1, 'alice', 25)
     
     Note over D,HF: 1. 挿入先のページとスロットを決定<br/>(空きスロットを探す、ただしまだ挿入しない)
-    D->>HF: find_free_slot() または 新しいページを準備
+    D->>HF: find_insert_location() または 新しいページを準備
     HF->>HF: 空きスロットを探す
     HF-->>D: (page_id=0, slot_id=0) - 挿入先を決定
     
