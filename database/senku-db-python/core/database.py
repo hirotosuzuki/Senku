@@ -72,9 +72,9 @@ class Database:
     def _recover(self):
         """起動時にリカバリを実行
         
-        WALファイルを読み込んで、チェックポイント以降の操作を再実行します。
+        WALファイルを読み込んで、チェックポイント以降の操作を再実行します.
         """
-        recovery_manager = RecoveryManager(self.db_path, self.catalog)
+        recovery_manager = RecoveryManager(self.db_path, self.catalog, self.checkpoint_manager)
         recovered_count = recovery_manager.recover()
         if recovered_count > 0:
             print(f"Recovered {recovered_count} log records from WAL")
