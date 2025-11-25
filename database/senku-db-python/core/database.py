@@ -58,7 +58,7 @@ class Database:
         # WALを初期化
         wal_path = self.db_path / "wal.log"
         self.wal_writer = WALWriter(wal_path)
-        self.checkpoint_manager = CheckpointManager(self.wal_writer, self.db_path)
+        self.checkpoint_manager = CheckpointManager(self.wal_writer, self.db_path, self.buffer_manager)
         
         # パーサを初期化
         self.parser = SqlParser()
@@ -85,11 +85,7 @@ class Database:
         Returns:
             チェックポイントのLSN
         """
-        # BufferManagerのダーティページをすべて書き込む
-        for table_name, heap_file in self.heap_files.items():
-            self.buffer_manager.flush_all(heap_file)
-        
-        # チェックポイントを実行
+        # CheckpointManagerがBufferManagerを使ってダーティページを書き込む
         return self.checkpoint_manager.checkpoint(self.heap_files)
     
     def _get_heap_file(self, table_name: str) -> Optional[HeapFile]:
