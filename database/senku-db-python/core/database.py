@@ -73,8 +73,16 @@ class Database:
         """起動時にリカバリを実行
         
         WALファイルを読み込んで、チェックポイント以降の操作を再実行します.
+        バッファマネージャーを渡すことで、リカバリ時もバッファプールを活用し、
+        メモリ上でページを更新します。ディスクへの書き込みはリカバリ完了後、
+        チェックポイント時にまとめて行われます。
         """
-        recovery_manager = RecoveryManager(self.db_path, self.catalog, self.checkpoint_manager)
+        recovery_manager = RecoveryManager(
+            self.db_path, 
+            self.catalog, 
+            self.checkpoint_manager,
+            buffer_manager=self.buffer_manager  # バッファマネージャーを注入
+        )
         recovered_count = recovery_manager.recover()
         if recovered_count > 0:
             print(f"Recovered {recovered_count} log records from WAL")
