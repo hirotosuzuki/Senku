@@ -8,7 +8,6 @@ Write-Ahead Loggingの「Write-Ahead」部分を担当します。
 import os
 import struct
 from pathlib import Path
-from typing import Optional
 from .record import LogRecord, LogType, InsertLogData
 
 
