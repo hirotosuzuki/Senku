@@ -1,0 +1,35 @@
+{
+  // Pythonの型チェッカーをpyrightに設定（Pylanceがpyrightを使用）
+  "python.analysis.typeCheckingMode": "basic",
+  "python.analysis.diagnosticMode": "workspace",
+  
+  // pyrightconfig.jsonを認識させる
+  "python.analysis.useLibraryCodeForTypes": true,
+  
+  // 型チェックの設定（pyrightconfig.jsonの設定を反映）
+  "python.analysis.diagnosticSeverityOverrides": {
+    "reportMissingImports": "warning",
+    "reportMissingTypeStubs": "none",
+    "reportGeneralTypeIssues": "error",
+    "reportOptionalMemberAccess": "error",
+    "reportOptionalSubscript": "error",
+    "reportPrivateImportUsage": "none",
+    "reportCallIssue": "error"
+  },
+  
+  // ファイルの保存時に型チェックを実行
+  "python.analysis.autoImportCompletions": true,
+  
+  // pyrightconfig.jsonの場所を指定
+  // database/senku-db-python/pyrightconfig.jsonが自動的に認識されます
+  "python.analysis.extraPaths": [
+    "${workspaceFolder}/database/senku-db-python"
+  ],
+  
+  // 特定のディレクトリに対してpyrightconfig.jsonを適用
+  "[python]": {
+    "editor.defaultFormatter": "ms-python.python",
+    "editor.formatOnSave": true
+  }
+}
+
